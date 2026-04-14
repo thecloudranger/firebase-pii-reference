@@ -32,5 +32,9 @@ node_modules/
 package-lock.json
 yarn.lock
 
+# ── Editor directories ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+
 # ── Old/backup files ──────────────────────────────────────────────────────────
 .old/
