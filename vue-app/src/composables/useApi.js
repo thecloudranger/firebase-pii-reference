@@ -1,4 +1,4 @@
-const BACKEND = "https://dammam-backend-REPLACE_WITH_PROJECT_NUMBER.me-central2.run.app"
+const BACKEND = import.meta.env.VITE_BACKEND_URL ?? ""
 
 function authHeaders(token) {
   return { Authorization: `Bearer ${token}` }
