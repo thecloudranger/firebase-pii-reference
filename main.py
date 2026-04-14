@@ -9,6 +9,9 @@ from firebase_admin import auth, initialize_app
 from google.cloud import firestore
 from google.cloud import storage as gcs
 from google.api_core.client_options import ClientOptions
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 logging.basicConfig(level=logging.INFO)
 
@@ -16,6 +19,9 @@ _, _project_id = google.auth.default()
 logging.info("Detected GCP project: %s", _project_id)
 
 app = FastAPI()
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 initialize_app(options={"projectId": _project_id})
 
 # 1. ALLOW CORS FOR FIREBASE HOSTING DOMAINS
@@ -43,16 +49,16 @@ async def verify_user(authorization: str):
         raise HTTPException(status_code=401, detail="Missing ID Token")
     try:
         id_token = authorization.split(" ")[1]
-        logging.info("verify_id_token: token_prefix=%s len=%d", id_token[:20], len(id_token))
         decoded_token = auth.verify_id_token(id_token)
         return decoded_token["uid"]
     except Exception as e:
         logging.error("verify_id_token failed: %s: %s", type(e).__name__, e)
-        raise HTTPException(status_code=401, detail=f"Unauthorized: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @app.get("/api/items")
-async def read_items(authorization: str = Header(None)):
+@limiter.limit("60/minute")
+async def read_items(request: Request, authorization: str = Header(None)):
     uid = await verify_user(authorization)
     docs = db.collection("users").document(uid).collection("items").stream()
     items = [{"id": d.id, **d.to_dict()} for d in docs]
@@ -72,6 +78,7 @@ async def read_items(authorization: str = Header(None)):
 
 
 @app.post("/api/items")
+@limiter.limit("10/minute")
 async def create_item(request: Request, authorization: str = Header(None)):
     uid = await verify_user(authorization)
     form = await request.form()
@@ -87,7 +94,8 @@ async def create_item(request: Request, authorization: str = Header(None)):
 # ─── v2 JSON endpoints (Vue frontend) ────────────────────────────────────────
 
 @app.get("/api/v2/items")
-async def list_items_json(authorization: str = Header(None)):
+@limiter.limit("60/minute")
+async def list_items_json(request: Request, authorization: str = Header(None)):
     uid = await verify_user(authorization)
     docs = db.collection("users").document(uid).collection("items").stream()
     items = []
@@ -98,6 +106,7 @@ async def list_items_json(authorization: str = Header(None)):
 
 
 @app.post("/api/v2/items")
+@limiter.limit("10/minute")
 async def create_item_json(request: Request, authorization: str = Header(None)):
     uid = await verify_user(authorization)
     body = await request.json()
@@ -111,7 +120,8 @@ async def create_item_json(request: Request, authorization: str = Header(None)):
 
 
 @app.get("/api/v2/items/{item_id}/documents")
-async def list_documents(item_id: str, authorization: str = Header(None)):
+@limiter.limit("60/minute")
+async def list_documents(request: Request, item_id: str, authorization: str = Header(None)):
     uid = await verify_user(authorization)
     docs = (
         db.collection("users").document(uid)
@@ -131,7 +141,9 @@ async def list_documents(item_id: str, authorization: str = Header(None)):
 
 
 @app.post("/api/v2/items/{item_id}/documents")
+@limiter.limit("5/minute")
 async def upload_document(
+    request: Request,
     item_id: str,
     file: UploadFile = File(...),
     authorization: str = Header(None),
