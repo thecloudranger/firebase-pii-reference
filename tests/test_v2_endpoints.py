@@ -4,6 +4,7 @@ Tests for /api/v2/* JSON endpoints.
 GCP services (Firebase Admin, Firestore, GCS, google.auth) are patched at
 module-import time so the test environment needs no GCP credentials.
 """
+import importlib
 import os
 import pytest
 from unittest.mock import MagicMock, patch
@@ -16,7 +17,13 @@ _FAKE_PROJECT = "YOUR_PROJECT_ID"
 
 def _auth_mock():
     m = MagicMock()
-    m.verify_id_token.return_value = {"uid": _FAKE_UID}
+
+    def _verify(token):
+        if not token.startswith("valid-"):
+            raise ValueError("bad token")
+        return {"uid": _FAKE_UID}
+
+    m.verify_id_token.side_effect = _verify
     return m
 
 
@@ -35,6 +42,23 @@ def client():
         from fastapi.testclient import TestClient
         import main
         return TestClient(main.app)
+
+
+@pytest.fixture(scope="function")
+def fresh_client():
+    """Function-scoped client — reloads main to reset slowapi limiter state."""
+    with (
+        patch("google.auth.default", return_value=(MagicMock(), _FAKE_PROJECT)),
+        patch("firebase_admin.initialize_app"),
+        patch("firebase_admin.auth", _auth_mock()),
+        patch("google.cloud.firestore.Client", return_value=MagicMock()),
+        patch("google.cloud.storage.Client", return_value=MagicMock()),
+        patch.dict(os.environ, {"GCS_BUCKET": "test-bucket", "CORS_ORIGINS": "http://localhost"}),
+    ):
+        importlib.reload(importlib.import_module("main"))
+        import main as main_module
+        from fastapi.testclient import TestClient
+        yield TestClient(main_module.app)
 
 
 AUTH = "Bearer valid-token"
@@ -185,3 +209,37 @@ def test_upload_document_success(client):
     assert data["original_filename"] == "contract.pdf"
     assert data["status"] == "uploaded"
     assert data["gcs_object"].startswith("gs://test-bucket/")
+
+
+# ── 401 error sanitisation ─────────────────────────────────────────────────────
+
+def test_401_does_not_leak_exception_class(client):
+    """The 401 detail must not contain Python exception class names."""
+    res = client.post("/api/v2/items", json={"name": "x"}, headers={"Authorization": "Bearer bad.token.here"})
+    assert res.status_code == 401
+    detail = res.json().get("detail", "")
+    assert "Error" not in detail, f"Exception class leaked in 401 detail: {detail}"
+    assert ":" not in detail, f"Exception detail leaked in 401 response: {detail}"
+
+
+def test_401_returns_unauthorized_string(client):
+    """The 401 detail must be exactly 'Unauthorized'."""
+    res = client.get("/api/v2/items", headers={"Authorization": "Bearer bad.token.here"})
+    assert res.status_code == 401
+    assert res.json()["detail"] == "Unauthorized"
+
+
+# ── Rate limiting (429 responses) ─────────────────────────────────────────────
+
+def test_upload_rate_limit(fresh_client):
+    """POST /documents must return 429 after 5 requests/minute per IP."""
+    statuses = []
+    for _ in range(7):
+        res = fresh_client.post(
+            "/api/v2/items/item1/documents",
+            files={"file": ("f.pdf", b"x", "application/pdf")},
+            headers={"Authorization": AUTH},
+        )
+        statuses.append(res.status_code)
+
+    assert 429 in statuses, f"Expected a 429 after 5 upload requests, got: {statuses}"
