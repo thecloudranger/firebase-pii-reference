@@ -1,4 +1,5 @@
 import logging
+import os
 import uuid
 import google.auth
 from fastapi import FastAPI, Header, HTTPException, Request, UploadFile, File
@@ -121,15 +122,16 @@ async def list_documents(item_id: str, authorization: str = Header(None)):
           .collection("items").document(item_id)
           .collection("documents").stream()
     )
-    return [
-        {
+    result = []
+    for d in docs:
+        data = d.to_dict()
+        uploaded_at = data.pop("uploaded_at", None)
+        result.append({
             "id": d.id,
-            **{k: v for k, v in d.to_dict().items() if k != "uploaded_at"},
-            "uploaded_at": d.to_dict().get("uploaded_at").isoformat()
-                           if d.to_dict().get("uploaded_at") else None,
-        }
-        for d in docs
-    ]
+            **data,
+            "uploaded_at": uploaded_at.isoformat() if uploaded_at else None,
+        })
+    return result
 
 
 @app.post("/api/v2/items/{item_id}/documents")
@@ -148,9 +150,13 @@ async def upload_document(
         raise HTTPException(status_code=404, detail="Item not found")
 
     unique_id = str(uuid.uuid4())
-    blob_name = f"users/{uid}/items/{item_id}/{unique_id}/{file.filename}"
+    safe_filename = os.path.basename(file.filename or "upload").replace(" ", "_") or "upload"
+    blob_name = f"users/{uid}/items/{item_id}/{unique_id}/{safe_filename}"
 
     content = await file.read()
+    MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds 10 MB maximum")
     bucket = storage_client.bucket(GCS_BUCKET)
     blob = bucket.blob(blob_name)
     blob.upload_from_string(content, content_type=file.content_type)
