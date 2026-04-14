@@ -21,11 +21,7 @@ initialize_app(options={"projectId": _project_id})
 # 1. ALLOW CORS FOR FIREBASE HOSTING DOMAINS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://YOUR_PROJECT_ID.web.app",
-        "https://YOUR_PROJECT_ID.firebaseapp.com",
-        "https://YOUR_VUE_SITE_ID.web.app",
-    ],
+    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -38,7 +34,7 @@ db = firestore.Client(
 
 # GCS bucket for document storage — me-central2 for KSA data residency.
 # Bucket location (me-central2) enforces data residency; all objects stay in Dammam.
-GCS_BUCKET = "YOUR_BUCKET_NAME"
+GCS_BUCKET = os.environ["GCS_BUCKET"]
 storage_client = gcs.Client()
 
 

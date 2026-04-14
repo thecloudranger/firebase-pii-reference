@@ -4,6 +4,7 @@ Tests for /api/v2/* JSON endpoints.
 GCP services (Firebase Admin, Firestore, GCS, google.auth) are patched at
 module-import time so the test environment needs no GCP credentials.
 """
+import os
 import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ def client():
     """FastAPI TestClient with all GCP calls mocked out."""
     import firebase_admin.auth  # ensure attribute exists on the module before patching
     with (
+        patch.dict(os.environ, {"GCS_BUCKET": "test-bucket", "CORS_ORIGINS": "http://localhost"}),
         patch("google.auth.default", return_value=(MagicMock(), _FAKE_PROJECT)),
         patch("firebase_admin.initialize_app"),
         patch("firebase_admin.auth", _auth_mock()),
@@ -182,4 +184,4 @@ def test_upload_document_success(client):
     assert data["id"] == "new-doc-id"
     assert data["original_filename"] == "contract.pdf"
     assert data["status"] == "uploaded"
-    assert data["gcs_object"].startswith("gs://YOUR_BUCKET_NAME/")
+    assert data["gcs_object"].startswith("gs://test-bucket/")
