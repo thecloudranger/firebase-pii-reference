@@ -1,20 +1,10 @@
 {
-  "hosting": [
-    {
-      "target": "htmx-app",
-      "public": "public",
-      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [
-        { "source": "**", "destination": "/index.html" }
-      ]
-    },
-    {
-      "target": "vue-app",
-      "public": "vue-app/dist",
-      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [
-        { "source": "**", "destination": "/index.html" }
-      ]
-    }
-  ]
+  "hosting": {
+    "target": "vue-app",
+    "public": "vue-app/dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      { "source": "**", "destination": "/index.html" }
+    ]
+  }
 }

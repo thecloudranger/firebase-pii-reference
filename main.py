@@ -3,7 +3,6 @@ import os
 import uuid
 import google.auth
 from fastapi import FastAPI, Header, HTTPException, Request, UploadFile, File
-from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from firebase_admin import auth, initialize_app
 from google.cloud import firestore
@@ -56,42 +55,6 @@ async def verify_user(authorization: str):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-@app.get("/api/items")
-@limiter.limit("60/minute")
-async def read_items(request: Request, authorization: str = Header(None)):
-    uid = await verify_user(authorization)
-    docs = db.collection("users").document(uid).collection("items").stream()
-    items = [{"id": d.id, **d.to_dict()} for d in docs]
-
-    if not items:
-        return HTMLResponse(
-            content="<li class='text-slate-400 py-4 text-center'>No records found in Dammam.</li>"
-        )
-
-    html = "".join(
-        [
-            f"<li class='flex justify-between p-3 bg-white border border-slate-100 mb-2 rounded shadow-sm'><span class='font-medium text-slate-700'>{i['name']}</span><span class='text-[10px] bg-slate-100 px-2 py-1 rounded font-bold uppercase'>{i.get('region', 'KSA')}</span></li>"
-            for i in items
-        ]
-    )
-    return HTMLResponse(content=html)
-
-
-@app.post("/api/items")
-@limiter.limit("10/minute")
-async def create_item(request: Request, authorization: str = Header(None)):
-    uid = await verify_user(authorization)
-    form = await request.form()
-    item_name = form.get("item_name")
-
-    doc_ref = db.collection("users").document(uid).collection("items").document()
-    doc_ref.set({"name": item_name, "region": "me-central2"})
-    return HTMLResponse(
-        content=f"<li class='flex justify-between p-3 bg-green-50 border border-green-200 mb-2 rounded animate-pulse'><span>{item_name}</span><span class='text-xs text-green-600 font-bold'>SAVED</span></li>"
-    )
-
-
-# ─── v2 JSON endpoints (Vue frontend) ────────────────────────────────────────
 
 @app.get("/api/v2/items")
 @limiter.limit("60/minute")
